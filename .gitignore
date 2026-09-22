@@ -1,0 +1,144 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+.venv-*/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (keep local, not in repo)
+data/*.db
+data/imgs/
+data/stats.json
+data/queue.db
+data/account_pool.db
+data/email_registry.db
+data/logs/
+data/local-logs/
+data/proxies.txt
+api.tar
+
+# Runtime
+*.log
+.env
+!deploy/.env.example
+
+# Root-level PNG screenshot debris (only root; docs/artifacts/ pngs stay tracked)
+/*.png
+
+# Local probe scripts (often contain real credentials; never commit)
+probe_*.py
+
+# Deploy artifacts
+deploy/cf_solver/debug_logs/
+deploy/cf_solver/proxies.txt
+deploy/data/
+
+# Test artifacts
+.pytest_cache/
+test-results/
+
+# Seal
+所有用到的提供商/
+
+# 参考项目（本地参考，不入库）
+可参考的项目/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
+
+# v6.5.0: Vite build output + frontend node_modules — not committed (server mounts dist via volume)
+dist/
+node_modules/
+landing/dist/
+frontend/dist/
+landing/node_modules/
+
+# Claude worktrees
+.claude/worktrees/
+
+# v3.1.0 构建缓存/诊断产物（可再生成，不入库）
+frontend/tsconfig.app.tsbuildinfo
+frontend/tsconfig.node.tsbuildinfo
+htmlcov/
+*.db-shm
+*.db-wal
+data/data/
+
+# P2-5: Python 工具缓存（可再生成，不入库）
+.mypy_cache/
+.ruff_cache/
+graft/.cache/
+
+# P2-5: uv 锁文件（如团队确定不用 uv 时忽略）
+uv.lock
+
+# v6.5.1: local-only (not committed)
+data/action_ids.json
+docs/artifacts/
+docs/计划书/
+任务1.txt
+
+# CodeGraph index — local-only (db/wal/shm already ignored by .codegraph/.gitignore)
+.codegraph/
+codegraph.lock
+
+# v6.7.0 M4 验收: 测试覆盖率/截图临时产物不入库
+.coverage
+.coverage.*
+# v6.8.0: 根目录测试运行日志临时产物
+.coverage_run.log
+.unit_run.log
+frontend/e2e_shots*/
+
+# External tool artifact (not project code)
+/config/
+.cursor/
+
+# G2 (v9.0.0): .benchmarks 中间产物防再积（仅留 6 基线 png + resp-shots/）
+.benchmarks/*.xml
+.benchmarks/*.txt
+.benchmarks/*.log
+.benchmarks/*.zip
+.benchmarks/*.json
+!.benchmarks/resp-shots/
+!.benchmarks/e2e-desktop.png
+!.benchmarks/e2e-mobile.png
+
+# v10.0.0 桌面版（Tauri）产物
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/node_modules/
+desktop/backend/uvicorn.exe
+
+freebuff
+.freebuff/
+backend/
+
+# P1-14 Playwright 视觉探针产物（不入库）
+frontend/artifacts/
+frontend/test-results/
+
+# 桌面已打包产物（用户机器构建，不入库）
+desktop/*.zip
+
+# Local browser packages are too large for GitHub and should be installed/downloaded per machine
+camoufox-*.zip
+vendor/camoufox-*/camoufox-*.zip

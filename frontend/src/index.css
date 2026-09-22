@@ -1,0 +1,902 @@
+/* ==========================================================================
+   听风AI (TingFeng AI) - Modern SaaS Design System & Tokens
+   ========================================================================== */
+
+:root {
+  /* 基础中性色调 (Light) */
+  --bg-canvas: #f8fafc;
+  --bg-subtle: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-card-hover: #fafafa;
+  --bg-card-elevated: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.85);
+
+  /* 边框与分割线 */
+  --border-subtle: #f1f5f9;
+  --border-default: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --border-focus: #6366f1;
+
+  /* 文字色阶
+     对比度（AA）：--text-muted 原 #94a3b8 on #fff ≈3.4:1 不达正文 4.5:1，
+     提至 #64748b（≈4.6:1）。辅助文字 12.5px 属"非正文"但保险起见仍提一档。
+     --text-secondary #475569 ≈7:1 达 AAA，保留。 */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  /* 主题主色 (Modern Indigo / Violet Gradient) */
+  --primary-50: #eef2ff;
+  --primary-100: #e0e7ff;
+  --primary-200: #c7d2fe;
+  --primary-500: #6366f1;
+  --primary-600: #4f46e5;
+  --primary-700: #4338ca;
+  --primary-gradient: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+  --primary-glow: rgba(99, 102, 241, 0.25);
+
+  /* 状态颜色 */
+  --success: #10b981;
+  --success-bg: #ecfdf5;
+  --success-border: #a7f3d0;
+  --success-text: #047857;
+
+  --warning: #f59e0b;
+  --warning-bg: #fffbeb;
+  --warning-border: #fde68a;
+  --warning-text: #b45309;
+
+  --danger: #ef4444;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-text: #b91c1c;
+
+  --info: #0ea5e9;
+  --info-bg: #f0f9ff;
+  --info-border: #bae6fd;
+  --info-text: #0369a1;
+
+  /* 阴影系统 */
+  --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+
+  /* 侧边栏色系 */
+  --sidebar-bg: #090d16;
+  --sidebar-border: #1e293b;
+  --sidebar-text: #94a3b8;
+  --sidebar-text-active: #ffffff;
+  --sidebar-item-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-item-active: rgba(99, 102, 241, 0.15);
+
+  /* 基础度量 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* —— 间距（4px 基准，1.25 比例）—— 统一间距取值，杜绝散写 12px/14px */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* —— z-index 层级 —— 统一取值，杜绝散写 9999 */
+  --z-base: 0;
+  --z-sticky: 30;
+  --z-drawer: 55;
+  --z-overlay: 50;
+  --z-toast: 70;
+  --z-modal: 80;
+
+  /* —— 动效曲线 —— */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 150ms;
+  --dur-normal: 250ms;
+  --dur-slow: 400ms;
+
+  /* —— 安全区（刘海屏/异形屏）—— viewport-fit=cover 时由 env() 兜底 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* P1-7 主题优先级链：`@media (prefers-color-scheme: dark)` 仅作为「无 data-theme 属性」的
+   系统跟随兜底（内联脚本被 CSP 拦截 / 隐私模式等）；一旦 JS 设置 data-theme，手动覆盖优先。
+   手动深色由下方 `:root[data-theme='dark']` 独立生效（不受系统偏好影响）。 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg-canvas: #090d16;
+    --bg-subtle: #0f172a;
+    --bg-card: #111827;
+    --bg-card-hover: #172033;
+    --bg-card-elevated: #1e293b;
+    --bg-glass: rgba(17, 24, 39, 0.85);
+
+    --border-subtle: #1e293b;
+    --border-default: #243047;
+    --border-strong: #334155;
+    --border-focus: #818cf8;
+
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #64748b;
+    --text-inverse: #0f172a;
+
+    --primary-50: rgba(99, 102, 241, 0.1);
+    --primary-100: rgba(99, 102, 241, 0.18);
+    --primary-200: #818cf8;
+    --primary-500: #6366f1;
+    --primary-600: #818cf8;
+    --primary-700: #a5b4fc;
+    --primary-glow: rgba(99, 102, 241, 0.35);
+
+    --success-bg: rgba(16, 185, 129, 0.12);
+    --success-border: rgba(16, 185, 129, 0.25);
+    --success-text: #34d399;
+
+    --warning-bg: rgba(245, 158, 11, 0.12);
+    --warning-border: rgba(245, 158, 11, 0.25);
+    --warning-text: #fbbf24;
+
+    --danger-bg: rgba(239, 68, 68, 0.12);
+    --danger-border: rgba(239, 68, 68, 0.25);
+    --danger-text: #f87171;
+
+    --info-bg: rgba(14, 165, 233, 0.12);
+    --info-border: rgba(14, 165, 233, 0.25);
+    --info-text: #38bdf8;
+
+    --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
+
+    --sidebar-bg: #05070d;
+    --sidebar-border: #151d2f;
+
+    /* v10.0.0 桌面版 · 暗色专业工作台 token（对齐选定 UI 方向） */
+    --bg-canvas-deep: #0f1420;
+    --bg-panel-deep: #1a2233;
+    --border-deep: #243047;
+    --text-strong-deep: #e2e8f0;
+    --mono-deep: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --accent-ok-deep: #10b981;
+    --accent-fail-deep: #ef4444;
+    --accent-run-deep: #3b82f6;
+    --accent-pending-deep: #94a3b8;
+    --grid-line-deep: rgba(96, 165, 250, 0.06);
+  }
+}
+
+/* —— P1-7 手动深色（localStorage tf-theme=dark）：独立于系统偏好，覆盖暗色 token —— */
+:root[data-theme='dark'] {
+  --bg-canvas: #090d16;
+  --bg-subtle: #0f172a;
+  --bg-card: #111827;
+  --bg-card-hover: #172033;
+  --bg-card-elevated: #1e293b;
+  --bg-glass: rgba(17, 24, 39, 0.85);
+
+  --border-subtle: #1e293b;
+  --border-default: #243047;
+  --border-strong: #334155;
+  --border-focus: #818cf8;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --text-inverse: #0f172a;
+
+  --primary-50: rgba(99, 102, 241, 0.1);
+  --primary-100: rgba(99, 102, 241, 0.18);
+  --primary-200: #818cf8;
+  --primary-500: #6366f1;
+  --primary-600: #818cf8;
+  --primary-700: #a5b4fc;
+  --primary-glow: rgba(99, 102, 241, 0.35);
+
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --success-border: rgba(16, 185, 129, 0.25);
+  --success-text: #34d399;
+
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning-border: rgba(245, 158, 11, 0.25);
+  --warning-text: #fbbf24;
+
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --danger-border: rgba(239, 68, 68, 0.25);
+  --danger-text: #f87171;
+
+  --info-bg: rgba(14, 165, 233, 0.12);
+  --info-border: rgba(14, 165, 233, 0.25);
+  --info-text: #38bdf8;
+
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
+
+  --sidebar-bg: #05070d;
+  --sidebar-border: #151d2f;
+
+  /* v10.0.0 桌面版 · 暗色专业工作台 token（对齐选定 UI 方向） */
+  --bg-canvas-deep: #0f1420;
+  --bg-panel-deep: #1a2233;
+  --border-deep: #243047;
+  --text-strong-deep: #e2e8f0;
+  --mono-deep: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  --accent-ok-deep: #10b981;
+  --accent-fail-deep: #ef4444;
+  --accent-run-deep: #3b82f6;
+  --accent-pending-deep: #94a3b8;
+  --grid-line-deep: rgba(96, 165, 250, 0.06);
+}
+
+/* v10.0.0 桌面版 · 暗色专业工作台：DAG 节点卡玻璃拟态 + 状态点亮 + 细网格背景。
+   P1-7：该页靠 JS 渲染（data-theme 必已设置），故直接以 `:where(:root[data-theme='dark'])`
+   为作用域，去掉 media 包裹（手动深色/系统深色统一走此规则；:where 不提升特异性）。 */
+:where(:root[data-theme='dark']) .agent-container {
+  background:
+    linear-gradient(rgba(0,0,0,0) 0%, rgba(15,20,32,0.6) 100%),
+    var(--bg-canvas-deep);
+  background-image:
+    linear-gradient(var(--grid-line-deep) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line-deep) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+:where(:root[data-theme='dark']) .dag-node-row {
+  background: rgba(26, 34, 51, 0.72);
+  border: 1px solid var(--border-deep);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-family: var(--mono-deep);
+}
+:where(:root[data-theme='dark']) .dag-node-status { font-weight: 600; letter-spacing: 0.02em; }
+:where(:root[data-theme='dark']) .dag-run-card { border-left-width: 3px; }
+:where(:root[data-theme='dark']) .dag-run-card.succeeded { border-left-color: var(--accent-ok-deep); }
+:where(:root[data-theme='dark']) .dag-run-card.failed   { border-left-color: var(--accent-fail-deep); }
+:where(:root[data-theme='dark']) .dag-run-card.running  { border-left-color: var(--accent-run-deep); }
+:where(:root[data-theme='dark']) .dag-run-card.pending  { border-left-color: var(--accent-pending-deep); }
+
+/* ==========================================================================
+   CSS Reset & Base Typography
+   ========================================================================== */
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: clamp(14px, 0.875rem + 0.2vw, 16px);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+code, kbd, samp, pre {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-feature-settings: "liga" 0;
+}
+
+/* ==========================================================================
+   Common Layout & UI Utilities
+   ========================================================================== */
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-title .title-badge {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+}
+
+.page-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* 卡片通用类 */
+.tf-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-normal);
+  position: relative;
+}
+
+.tf-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong);
+}
+
+/* 按钮通用体系 */
+.tf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tf-btn:active {
+  transform: scale(0.98);
+}
+
+.tf-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.tf-btn-primary {
+  background: var(--primary-gradient);
+  color: #ffffff;
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+
+.tf-btn-primary:hover:not(:disabled) {
+  opacity: 0.94;
+  box-shadow: 0 4px 12px var(--primary-glow);
+}
+
+.tf-btn-secondary {
+  background: var(--bg-card);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.tf-btn-secondary:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+.tf-btn-danger {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.tf-btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.tf-btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.tf-btn-lg {
+  padding: 10px 22px;
+  font-size: 14.5px;
+  border-radius: var(--radius-lg);
+}
+
+/* tf-btn-loading：UI 通用 Button 组件的提交中态 —— 保留原生 button 语义，
+   仅追加视觉指示。跟随全局 prefers-reduced-motion 降级（功能性指示加速完成）。 */
+.tf-btn-loading {
+  cursor: progress;
+}
+
+.tf-btn-spinner {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--radius-full);
+  animation: tf-btn-spin 0.8s linear infinite;
+}
+
+@keyframes tf-btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 输入框与选择器通用类 */
+.tf-input, .tf-select {
+  padding: 7px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-xs);
+}
+
+.tf-input:focus, .tf-select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* 仅键盘聚焦时补 outline 环（鼠标点击已有 box-shadow 高亮，不闪双环） */
+.tf-input:focus-visible, .tf-select:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.tf-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* 表格通用体系 */
+.tf-table-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.tf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tf-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-default);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.tf-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.tf-table tr:last-child td {
+  border-bottom: none;
+}
+
+.tf-table tr:hover td {
+  background: var(--bg-card-hover);
+}
+
+/* 状态徽章 Badge */
+.tf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.tf-badge-success {
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  color: var(--success-text);
+}
+
+.tf-badge-warning {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+}
+
+.tf-badge-danger {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+}
+
+.tf-badge-info {
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
+}
+
+.tf-badge-neutral {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+/* 脉冲/呼吸灯点 */
+.tf-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.tf-dot-pulse {
+  position: relative;
+}
+
+.tf-dot-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: inherit;
+  opacity: 0.4;
+  animation: tf-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes tf-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(2); opacity: 0; }
+}
+
+/* WebSocket 重新连接指示器与心跳 */
+.ws-reconnecting-badge {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: var(--warning);
+  color: var(--warning-text);
+  animation: ws-blink 1.2s ease-in-out infinite alternate;
+}
+
+.ws-spinner-dot {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--warning);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ws-spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes ws-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ws-blink {
+  from { opacity: 0.75; }
+  to { opacity: 1; }
+}
+
+.heartbeat-indicator {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 窄屏 375px (iPhone SE) 响应式适配打磨 */
+@media (max-width: 480px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .page-header > div:last-child,
+  .dashboard-header-actions,
+  .logs-action-bar,
+  .tasks-filter-bar {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .api-key-badge {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .heartbeat-indicator {
+    display: block;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+}
+
+@media (max-width: 375px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .tf-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+  .page-title {
+    font-size: 17px;
+  }
+  .page-desc {
+    font-size: 12px;
+  }
+  .tf-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ==========================================================================
+   全局无障碍 & 响应式增强（v7.5 前端体验升级）
+   ==========================================================================
+
+   skip-link：键盘用户跳过侧栏直达主内容（WCAG 2.4.1）。
+   默认屏幕外不可见，Tab 聚焦时滑入。
+*/
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-toast);
+  padding: 8px 16px;
+  background: var(--primary-600);
+  color: #ffffff;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-lg);
+  /* 视觉隐藏但保留可聚焦 */
+  transform: translateY(-150%);
+  transition: transform var(--transition-fast);
+}
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid var(--primary-200);
+  outline-offset: 2px;
+}
+
+/* 全局焦点可见态：键盘 Tab 聚焦任何交互元素都给可见环（WCAG 2.4.7 / 1.4.11）。
+   仅 :focus-visible（键盘）触发，鼠标点击不闪环。 */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+/* 原组件自带 outline 的不叠加（如 .tf-input:focus 已有 box-shadow，此处仍补 outline 兜底） */
+
+/* 触控目标放大（移动端 ≥44px，WCAG 2.5.5 Target Size / 2.2 Target Size Minimum） */
+@media (max-width: 860px) {
+  .tf-btn {
+    min-height: 44px;
+    padding: 11px 18px;
+    font-size: 14px;
+  }
+  .tf-btn-sm {
+    min-height: 40px;
+  }
+}
+
+/* 触控设备 hover 降级：避免移动端 :hover 粘住（无指针设备不触发 hover）。
+   显式回退到默认态值（非 revert-layer，Safari<16.4 不识 revert-layer 会半残）。 */
+@media (hover: none) {
+  .tf-card:hover,
+  .stat-card-modern:hover {
+    background: var(--bg-card);
+    box-shadow: var(--shadow-sm);
+    border-color: var(--border-default);
+  }
+  .nav-item:hover {
+    color: var(--sidebar-text);
+    background: transparent;
+  }
+  .tf-table tr:hover td {
+    background: transparent;
+  }
+}
+
+/* 响应式栅格过渡（补 768px/1024px 档，避免 auto-fill 跳列 CLS） */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (min-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+}
+/* 大屏内容栏上限，避免超宽屏拉伸难读 */
+@media (min-width: 1440px) {
+  .main-content {
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+}
+
+/* prefers-reduced-motion：尊重用户系统设置，降级装饰性动画（WCAG 2.3.3）。
+   功能性反馈（spinner/pulse 状态点）加速完成而非完全移除，保留状态可感知性。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 动态视口单位降级：100dvh 跟踪 iOS Safari 地址栏伸缩，旧浏览器回退 100vh */
+.layout-sidebar,
+.layout-root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* 安全区兜底：Layout.tsx 内联样式仍用 100vh，此处全局补 dvh 与安全区。
+   Layout 组件迁移到 CSS Modules 时会直接用这些令牌。 */
+.layout-topbar {
+  padding-top: calc(var(--space-2) + var(--safe-top));
+  padding-left: calc(var(--space-8) + var(--safe-left));
+  padding-right: calc(var(--space-8) + var(--safe-right));
+}
+.main-content {
+  padding-bottom: calc(var(--space-8) + var(--safe-bottom));
+  padding-left: calc(var(--space-8) + var(--safe-left));
+  padding-right: calc(var(--space-8) + var(--safe-right));
+}
+@media (max-width: 860px) {
+  .layout-topbar {
+    padding-left: calc(var(--space-4) + var(--safe-left));
+    padding-right: calc(var(--space-4) + var(--safe-right));
+  }
+  .main-content {
+    padding-left: calc(var(--space-4) + var(--safe-left));
+    padding-right: calc(var(--space-4) + var(--safe-right));
+  }
+}
+
+/* ── v10.0.0 Agent / DAG 编排页 ─────────────────────────── */
+.agent-container { max-width: 1120px; }
+.agent-container .page-subtitle { margin: 4px 0 0; color: var(--text-dim, #7c8798); font-size: 13px; }
+.dag-composer { background: var(--card-bg, #fff); border-radius: 14px; padding: 16px; margin: 16px 0; border: 1px solid var(--border, #e5e9f0); }
+.dag-composer textarea {
+  width: 100%; min-height: 72px; resize: vertical; border-radius: 10px; padding: 10px 12px;
+  font: inherit; line-height: 1.55; color: var(--text, #1a2333);
+  border: 1px solid var(--border, #e5e9f0); background: var(--input-bg, #f8fafc);
+}
+.dag-composer textarea:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+.dag-composer-actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.dag-section-title { font-weight: 600; font-size: 14px; margin: 18px 0 10px; color: var(--text, #1a2333); }
+.dag-plan-preview, .dag-current-run, .dag-history { margin-top: 4px; }
+.dag-run-card { border: 1px solid var(--border, #e5e9f0); border-radius: 12px; margin-bottom: 8px; background: var(--card-bg, #fff); overflow: hidden; }
+.dag-run-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; background: none; border: none; font: inherit; text-align: left; }
+.dag-run-head:hover { background: rgba(59, 130, 246, .05); }
+.dag-run-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dag-run-status { font-weight: 600; }
+.dag-run-time { color: var(--text-dim, #7c8798); font-size: 12px; }
+.dag-run-toggle { color: var(--text-dim, #7c8798); }
+.dag-run-detail { border-top: 1px dashed var(--border, #e5e9f0); padding: 8px 14px 12px; }
+.dag-run-error { color: #ef4444; font-size: 12px; margin: 6px 0; word-break: break-all; }
+.dag-node-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; flex-wrap: wrap; }
+.dag-node-kind { background: rgba(59, 130, 246, .1); color: #2563eb; border-radius: 6px; padding: 1px 8px; font-size: 12px; font-weight: 600; }
+.dag-node-id { font-weight: 600; }
+.dag-node-status { font-weight: 600; }
+.dag-node-meta { color: var(--text-dim, #7c8798); font-size: 12px; }
+.dag-node-error { color: #ef4444; font-size: 12px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dag-node-result { color: #2563eb; font-size: 12px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* v12.0.1 DAG SVG 分层图 + 推理轨迹（black-box）面板 */
+.dag-graph-canvas { overflow-x: auto; border: 1px solid var(--border-default, #e2e8f0); border-radius: 12px; background: var(--bg-subtle, #f1f5f9); padding: 4px; }
+.dag-svg { display: block; }
+.dag-svg-node { cursor: pointer; }
+.dag-svg-node:focus { outline: none; }
+.dag-svg-node:focus-visible .dag-svg-node-box { stroke-width: 2.5; }
+.dag-svg-node-box { fill: var(--bg-card, #fff); stroke-width: 1.5; transition: filter var(--dur-fast, 150ms) ease; }
+.dag-svg-node:hover .dag-svg-node-box { filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.18)); }
+.dag-svg-node.selected .dag-svg-node-box { stroke-width: 2.5; filter: drop-shadow(0 0 6px var(--primary-glow, rgba(99, 102, 241, 0.25))); }
+.dag-svg-kind { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--text-muted, #64748b); }
+.dag-svg-id { font-size: 12px; font-weight: 600; fill: var(--text-primary, #0f172a); }
+.dag-svg-edge { fill: none; stroke-width: 1.5; opacity: 0.55; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .dag-node-running .dag-svg-node-box { animation: dag-breath 1.6s ease-in-out infinite; }
+  .dag-node-running .dag-svg-status-dot { animation: dag-breath 1.6s ease-in-out infinite; }
+}
+@keyframes dag-breath {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.dag-trace { margin-top: 10px; border: 1px solid var(--border-default, #e2e8f0); border-radius: 12px; background: var(--bg-card, #fff); padding: 12px 14px; }
+.dag-trace-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dag-trace-id { font-weight: 700; font-family: var(--mono-deep, monospace); font-size: 13px; }
+.dag-trace-meta { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-muted, #64748b); font-size: 12px; margin-top: 6px; }
+.dag-trace-label { font-size: 11px; font-weight: 700; color: var(--text-muted, #64748b); letter-spacing: 0.05em; margin: 10px 0 4px; text-transform: uppercase; }
+.dag-trace-block { font-family: var(--mono-deep, 'JetBrains Mono', Consolas, monospace); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; background: var(--bg-subtle, #f1f5f9); border-radius: 8px; padding: 8px 10px; max-height: 220px; overflow-y: auto; color: var(--text-primary, #0f172a); margin: 0; }
+.dag-trace-block.is-error { background: var(--danger-bg, #fef2f2); color: var(--danger-text, #b91c1c); }
+.dag-trace-empty { color: var(--text-muted, #64748b); font-size: 13px; padding: 10px 2px; }
+.dag-trace-empty-inline { color: var(--text-muted, #64748b); font-size: 12px; margin-top: 8px; }
+.dag-polling-hint { font-size: 12px; color: var(--text-dim, #7c8798); font-weight: 400; }

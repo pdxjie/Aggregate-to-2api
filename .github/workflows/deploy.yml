@@ -1,0 +1,206 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: 测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx pytest-timeout pytest-benchmark
+      - name: 运行测试
+        # pytest-timeout 兜底单测 120s；faulthandler 在卡死时 dump 线程栈定位；
+        # -p no:cacheprovider 避免缓存干扰；sessionfinish teardown 若卡 aiosqlite join，
+        # job timeout-minutes=8 兜底整体 fail 而非挂 18min。
+        run: pytest tests/ -q -m "not integration and not chaos and not slow" --timeout=120 --timeout-method=thread -p faulthandler -p no:cacheprovider --cov=api --cov-report=term --cov-fail-under=80
+        env:
+          IF_ACCOUNT_AUTO: "0"
+          IF_MOCK_REGISTER: "1"
+          IF_DB_FILE: "data/test-deploy.db"
+
+  build:
+    name: 构建并推送 Docker 镜像到 GHCR
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 构建 API 镜像（缓存加速）
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.api
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/aggregate-to-2api/imagefree-api:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/aggregate-to-2api/imagefree-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: SSH 热更新部署（零宕机）
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 设置 Node.js（构建前端）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: 构建 frontend（管理面板）
+        run: |
+          cd frontend && npm ci && npm run build
+      - name: 构建 landing（落地页）
+        run: |
+          cd landing && npm ci && npm run build
+      # P0-2：tag 发版是版本一致性的最后一道闸。build 后立即断言 dist 里注入的
+      # __APP_VERSION__ 与源码三处版本一致（防 build 产物漂移被静默带上线）。
+      - name: 断言 landing dist 版本与源码一致
+        run: |
+          VERSION=$(node -p "require('./landing/package.json').version")
+          echo "landing package.json version: $VERSION"
+          grep -rl "$VERSION" landing/dist/assets/*.js >/dev/null && echo "OK: dist 已含版本 $VERSION" || { echo "FAIL: landing/dist/assets/*.js 未含版本 $VERSION（npm run build 未跑或 __APP_VERSION__ 注入失效）"; exit 1; }
+      - name: 打包 dist 产物
+        run: |
+          tar -czf frontend-dist.tgz -C frontend/dist .
+          tar -czf landing-dist.tgz -C landing/dist .
+      - name: 上传 dist 到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "frontend-dist.tgz,landing-dist.tgz"
+          target: "/tmp/"
+          timeout: "60s"
+      - name: SSH 拉新镜像 + 部署 dist + 热重启
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          command_timeout: 10m
+          script: |
+            set -e
+            cd /home/ubuntu/imagefree-api
+
+            # git pull 最新代码（Dockerfile/compose 等）
+            sudo git fetch origin && sudo git reset --hard origin/main
+
+            cd deploy
+
+            # 拉取最新 API 镜像（GHCR）；失败则本地 build
+            sudo docker pull ghcr.io/lza6/aggregate-to-2api/imagefree-api:latest 2>/dev/null && \
+              export API_IMAGE="ghcr.io/lza6/aggregate-to-2api/imagefree-api:latest" || \
+              { echo "GHCR 镜像拉取失败，本地 build"; export DOCKER_BUILDKIT=0; sudo docker build --no-cache -f Dockerfile.api -t imagefree-api:6.8.0 ..; }
+
+            # 部署前端 dist 产物
+            mkdir -p ../frontend/dist ../landing/dist
+            tar -xzf /tmp/frontend-dist.tgz -C ../frontend/dist
+            tar -xzf /tmp/landing-dist.tgz -C ../landing/dist
+            rm -f /tmp/frontend-dist.tgz /tmp/landing-dist.tgz
+
+            # v7.7.12：优化部署停机窗口——subnet 已固定 172.28.0.0/16 且 cfsolver 镜像 tag
+            # 固定 :latest（首次 build 后持续可用），故不再每次 down 全量杀容器。
+            # 改为：cfsolver 保持运行（若不存在或 unhealthy 才重建），api 用 --no-deps
+            # 只 recreate 自身，停机窗口从 1-2 分钟缩到秒级（Caddy 反代重试兜底）。
+            export DOCKER_BUILDKIT=0
+            # cfsolver 健康检查：不存在或 unhealthy 才 build+up
+            if ! sudo docker ps --filter "name=imagefree-cfsolver" --filter "health=healthy" | grep -q imagefree-cfsolver; then
+              echo "cfsolver 不健康或不存在，重建"
+              sudo docker compose build cfsolver 2>/dev/null || \
+                { echo "cfsolver build 失败，尝试用旧镜像继续"; }
+              sudo docker compose up -d --force-recreate --no-build cfsolver
+              # 等 cfsolver 健康（最多 60s）
+              for i in $(seq 1 30); do
+                if sudo docker ps --filter "name=imagefree-cfsolver" --filter "health=healthy" | grep -q imagefree-cfsolver; then
+                  echo "cfsolver 健康（第 ${i} 次检查）"
+                  break
+                fi
+                sleep 2
+              done
+            else
+              echo "cfsolver 健康，保持运行不重建"
+            fi
+            # api 用 --no-deps 只 recreate 自身（cfsolver 不动，秒级停机）
+            sudo docker compose up -d --force-recreate --no-build --no-deps api
+
+            # 等待健康
+            echo "等待 API 健康..."
+            API_HEALTHY=0
+            for i in $(seq 1 30); do
+              if curl -s http://localhost:8100/v1/healthz | grep -q '"status":"ok"'; then
+                echo "API 健康（第 ${i} 次检查）"
+                API_HEALTHY=1
+                break
+              fi
+              sleep 2
+            done
+            # v7.7.12：健康检查失败必须 exit 1，避免 Deploy 假成功（容器没起但 job 报绿）
+            if [ "$API_HEALTHY" -ne 1 ]; then
+              echo "❌ API 30 次检查未健康，部署失败（dump 容器日志）"
+              sudo docker logs imagefree-api --tail 30 2>&1 || true
+              exit 1
+            fi
+
+            # 验证
+            echo "=== 验证 ==="
+            curl -s -o /dev/null -w "GET /admin -> %{http_code}\n" http://localhost:8100/admin
+            curl -s -o /dev/null -w "GET /admin/ -> %{http_code}\n" http://localhost:8100/admin/
+            curl -s -o /dev/null -w "GET / -> %{http_code}\n" http://localhost:8100/
+            curl -s http://localhost:8100/v1/healthz | python3 -c "import sys,json;d=json.load(sys.stdin);print('status:',d['status'],'providers:',list(d['providers'].keys()))" 2>/dev/null || echo "healthz 解析失败"
+            echo "部署完成"
+
+  release:
+    name: 创建发行版
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 生成发行版说明
+        id: release_notes
+        run: |
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "# imagefree-api ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "## 变更" >> $GITHUB_OUTPUT
+          git log --oneline --no-decorate $(git tag --sort=-creatordate | head -2 | tail -1)..HEAD 2>/dev/null || \
+            git log --oneline --no-decorate -20 >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body: ${{ steps.release_notes.outputs.notes }}
+          generate_release_notes: false

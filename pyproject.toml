@@ -1,0 +1,73 @@
+# imagefree_api 项目配置
+[project]
+name = "imagefree-2ai"
+version = "19.0.0"
+description = "High concurrency image generation API"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "websockets>=12.0,<14",
+    "httpx>=0.24",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "aiosqlite>=0.20.0",
+    "prometheus-client>=0.21",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.ruff]
+# API 代码仅运行于 Python 3.11+，显式声明 target-version 消除 ExceptionGroup 的 F821 误报
+# （ExceptionGroup 是 3.11 内置；ruff 0.6.x 未识别 requires-python 时默认推到旧 target）
+target-version = "py311"
+# 工程化基线（参考 2Captcha-MCP）：行长放宽到 120（中文注释），format 按 120 对齐。
+line-length = 120
+
+[tool.ruff.lint]
+# v8.0 P0-9: select 规则族正式引入（P0-8 治理后清零）
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC"]
+ignore = ["ASYNC110", "ASYNC109", "ASYNC230", "B017", "B027", "B011", "B904", "SIM102", "SIM105", "SIM108", "SIM103", "SIM115", "B007", "E501", "E402", "B023", "ASYNC251", "B009", "B905"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# 默认宽松：不强制全部注解，避免一次性大面积改造；仅 per-module strict 收紧
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["tests/", "scripts/", "可参考的项目/", "deploy/", "graft/", "landing/", "frontend/"]
+
+# per-module 渐进 strict：v9.0.0 已扩面到 4 模块（errors/retry_policy + db.core/db.queries）。
+# db.core/db.queries 自身 0 error（v8.5.0 拆分后 dict/list 泛型化 + Row|None 索引 None 检查 +
+# aiosqlite 内部属性 type: ignore[attr-defined]）；剩余 552 错误均为传导错误（config/telemetry
+# 等其他模块），待 v9.5.0 继续扩面收敛。
+[[tool.mypy.overrides]]
+module = ["api.errors", "api.retry_policy", "api.db.core", "api.db.queries", "api.agent.dag", "api.agent.planner", "api.routes.agent_dag_store_sqlite"]
+strict = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_return_any = true
+
+[tool.pytest.ini_options]
+# 测试发现：tests/ 目录（pytest 风格）+ scripts/ 下的 unittest 文件
+testpaths = ["tests"]
+# 收集规则：默认 python_classes=Test*（pytest 8 默认）即可，无需显式覆盖
+addopts = '-p no:cacheprovider --no-header -q -m "not slow"'
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+# pytest-asyncio 1.4: 测试函数默认 function-scope loop，与 session fixture loop 分离，
+# app 的 engine/semaphore 绑定 session loop → 跨 loop 死锁（txt2img flow 卡死根因）。
+# 统一 test loop 到 session scope，与 conftest event_loop fixture 共享。
+asyncio_default_test_loop_scope = "session"
+markers = [
+    "benchmark: performance benchmark tests (pytest-benchmark).",
+    "chaos: fault injection / chaos engineering tests.",
+    "integration: end-to-end / cross-component integration tests.",
+    "slow: slow / real-network tests.",
+]

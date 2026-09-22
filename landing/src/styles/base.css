@@ -1,0 +1,340 @@
+/* ============================================================
+   Design tokens & base — 液态玻璃 Liquid Glass（2026 trending）
+   底层深蓝黑 + 半透明玻璃层 + 天蓝/粉珊瑚高光
+   保留旧 token 名以兼容各 Section 组件引用，仅演进值
+   ============================================================ */
+:root {
+  /* ── 底层 ── */
+  --bg:        #0a0e1a;   /* 深蓝黑（原 #0f172a 下沉，玻璃需要更深底才透得出）*/
+  --bg-2:      #050811;
+  --bg-grad:   radial-gradient(ellipse at 50% -10%, #0f1626 0%, #0a0e1a 55%, #050811 100%);
+
+  /* ── 玻璃层（Liquid Glass 核心）── */
+  --card:       rgba(255, 255, 255, 0.045);
+  --card-2:     rgba(255, 255, 255, 0.07);
+  --card-hover: rgba(255, 255, 255, 0.09);
+  --glass-hi:   rgba(255, 255, 255, 0.14);
+  --line:       rgba(255, 255, 255, 0.09);
+  --line-2:     rgba(255, 255, 255, 0.16);
+
+  /* ── 高光（替代原 indigo 主调）── */
+  --brand:     #60a5fa;   /* 天蓝高光 */
+  --brand-2:   #93c5fd;
+  --brand-3:   #bfdbfe;
+  --brand-soft: rgba(96, 165, 250, 0.16);
+  --brand-glow: rgba(96, 165, 250, 0.42);
+
+  /* 次强调：粉珊瑚 */
+  --accent:     #f472b6;
+  --accent-2:   #fda4af;
+  --accent-soft: rgba(244, 114, 182, 0.14);
+  --accent-glow: rgba(244, 114, 182, 0.32);
+
+  /* ── 语义色（保留）── */
+  --ok: #10b981;  --ok-soft: rgba(16, 185, 129, 0.14);
+  --warn: #f59e0b; --warn-soft: rgba(245, 158, 11, 0.14);
+  --err: #ef4444;  --err-soft: rgba(239, 68, 68, 0.14);
+
+  /* ── 文本 ── */
+  --text: #ffffff;
+  --text-2: #dbe4f0;
+  --muted: #94a3b8;
+  --muted-2: #64748b;
+
+  /* ── 圆角 ── */
+  --radius: 18px;
+  --radius-sm: 12px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+
+  /* ── 阴影 ── */
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-glow: 0 0 0 1px rgba(96, 165, 250, 0.22), 0 12px 40px rgba(0, 0, 0, 0.45), 0 0 28px rgba(96, 165, 250, 0.18);
+  --shadow-accent: 0 0 28px rgba(244, 114, 182, 0.22);
+
+  /* ── 字体 ── */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+
+  /* ── 间距 ── */
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --space-7: 72px;
+
+  --container: 1160px;
+
+  /* ── 动效缓动 ── */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 0.18s;
+  --dur: 0.32s;
+  --dur-slow: 0.6s;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; border: none; cursor: pointer; }
+
+h1, h2, h3, h4 {
+  margin: 0;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+p { margin: 0; }
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-grad);
+}
+
+.container {
+  width: 100%;
+  max-width: var(--container);
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.muted { color: var(--muted); }
+.muted-2 { color: var(--muted-2); }
+
+/* ── 玻璃背景场（3D canvas 容器，位于最底层）── */
+.bg-field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.bg-field canvas { display: block; }
+
+/* ── 顶部品牌光晕（保留 .aura，升级为流动光）── */
+.aura {
+  position: fixed;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  height: 60vh;
+  background:
+    radial-gradient(closest-side at 50% 30%, var(--brand-glow), transparent 70%),
+    radial-gradient(closest-side at 18% 50%, rgba(244, 114, 182, 0.10), transparent 60%),
+    radial-gradient(closest-side at 82% 60%, rgba(96, 165, 250, 0.10), transparent 60%);
+  filter: blur(8px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── 胶囊标签（升级玻璃质感）── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.pill.ok { background: var(--ok-soft); color: #34d399; border-color: rgba(16, 185, 129, 0.22); }
+.pill.warn { background: var(--warn-soft); color: #fbbf24; border-color: rgba(245, 158, 11, 0.22); }
+.pill.err { background: var(--err-soft); color: #f87171; border-color: rgba(239, 68, 68, 0.22); }
+.pill.info { background: var(--brand-soft); color: #93c5fd; border-color: rgba(96, 165, 250, 0.22); }
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.dot.err { background: var(--err); box-shadow: 0 0 8px var(--err); }
+.dot.muted { background: var(--muted-2); }
+
+/* ── 通用玻璃卡片（.card 升级为液态玻璃）── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  position: relative;
+  overflow: hidden;
+}
+/* 玻璃高光边（顶部一抹反光）*/
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 40%, transparent 60%, rgba(255, 255, 255, 0.05));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* ── 代码块 ── */
+.code-box {
+  background: rgba(5, 8, 17, 0.6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.code-box pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: #dbe4f0;
+}
+.code-box .tok-kw { color: #c084fc; }
+.code-box .tok-str { color: #86efac; }
+.code-box .tok-comment { color: #64748b; }
+.code-box .tok-cmd { color: #fbbf24; }
+
+/* ── 焦点态 ── */
+:focus-visible {
+  outline: 2px solid var(--brand-2);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ── 滚动条 ── */
+.ov {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.ov::-webkit-scrollbar { height: 8px; }
+.ov::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 999px; }
+.ov::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 动效（降级：CSS 版，motion-v 在 JS 层接管更复杂动画）── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp var(--dur-slow) var(--ease-spring) both; }
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(96, 165, 250, 0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ── 降级占位 ── */
+.degraded {
+  color: var(--muted-2);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ============================================================
+   响应式降级：移动端 / 低性能 / 无 backdrop-filter 支持
+   ============================================================ */
+@supports not (backdrop-filter: blur(1px)) {
+  .card {
+    background: rgba(15, 22, 38, 0.92);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .pill { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+@media (max-width: 768px) {
+  .card {
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+  }
+}
+
+/* ── reduced-motion 全局降级：禁用动画 ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .fade-up { animation: none; opacity: 1; transform: none; }
+}
+
+/* ── 文本渐变工具 ── */
+.text-grad {
+  background: linear-gradient(120deg, var(--text), var(--brand-2) 60%, var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ============================================================
+   P2-C2: 原生滚动揭示（替代 motion-v whileInView）
+   useReveal() 返回 ref + shown，组件用 :class 切换 .reveal-init/.reveal-in
+   ============================================================ */
+.reveal {
+  transition: opacity var(--dur-slow) var(--ease-spring), transform var(--dur-slow) var(--ease-spring);
+  will-change: opacity, transform;
+}
+.reveal-init {
+  opacity: 0;
+  transform: translateY(28px);
+}
+.reveal-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal-init, .reveal-in {
+    transition: none;
+    opacity: 1;
+    transform: none;
+  }
+}

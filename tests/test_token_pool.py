@@ -1,0 +1,400 @@
+"""TokenPoolManager（多 key token 池）单元测试 + main 层新观测字段断言。
+
+mock 掉 turnstile_client.solve_turnstile（不依赖真实 cf_solver），验证：
+direct 池预取/取用、per-proxy 懒创建（proxy 透传）、熔断快速失败、动态水位、
+事件驱动补池低延迟、proxy 池空闲判定；以及 /healthz 与 /metrics 的新 solver 指标字段。
+"""
+
+import asyncio
+import time
+
+import pytest
+
+from api import config
+from api.worker import TokenPoolManager
+
+
+@pytest.fixture(autouse=True)
+def _reset_solver_guard():
+    """v10.0.0 flaky 根修：token_pool 单测的 acquire 依赖全局 solver_guard 电路。
+
+    集成测试（test_circuit_breaker 等）会在同一会话进程里把 mock solver 注入
+    故障并把 solver_guard 电路打到 OPEN；其恢复探测靠 sleep，时序上可能残留
+    OPEN → 后续 token_pool 单测 `if solver_guard.circuit_open and pool.size()==0:
+    return None` 直接拿不到 token 而批量失败（test_direct_pool 等 acquire None）。
+    每个用例前重置 solver_guard（_reset() 清节点电路与计数），保证单测从干净
+    电路开始——与 conftest 的 reset_settings/_reset_guard 同策略（隔离全局态）。
+    """
+    from api.solver_guard import solver_guard as _sg
+
+    _sg._reset()
+    yield
+    _sg._reset()
+
+
+class _EngineStub:
+    """最小 engine 替身：只提供 manager 依赖的 queue 与 _started。"""
+
+    def __init__(self) -> None:
+        self.queue = asyncio.Queue(maxsize=10)
+        self._started = True
+
+
+@pytest.fixture
+def fake_solve(monkeypatch):
+    """把 worker 引用的 solve_turnstile 换成可控假实现，记录 proxy 调用。"""
+    calls = {"proxies": []}
+
+    async def _fake(cf_solver_url, url, sitekey, timeout, proxy=None):
+        calls["proxies"].append(proxy)
+        await asyncio.sleep(0.03)
+        return (f"mock-token-{proxy or 'direct'}-{time.time_ns()}", 0.03)
+
+    monkeypatch.setattr("api.turnstile_client.solve_turnstile", _fake)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_direct_pool_prefetch_and_acquire(fake_solve):
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        tok = await m.acquire("direct", timeout=3)
+        assert tok and tok.startswith("mock-token-direct-")
+        assert m.wait_timeout_total == 0
+        snap = m.pools_snapshot()
+        assert "direct" in snap
+        assert snap["direct"]["key"] == "direct"
+        assert "size" in snap["direct"] and "target" in snap["direct"]
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_proxy_pool_lazy_create_and_proxy_passthrough(fake_solve):
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        proxy = "http://user:pw@127.0.0.1:9999"
+        tok = await m.acquire(proxy, timeout=3)
+        assert tok and tok.startswith("mock-token-")
+        assert proxy in fake_solve["proxies"]  # 求解时 proxy 透传给 cf_solver（内部完整 URL）
+        snap = m.pools_snapshot()
+        # 观测面标签/快照必须脱敏：不泄漏 user:pass 凭据
+        assert "proxy:127.0.0.1:9999" in snap
+        assert snap["proxy:127.0.0.1:9999"]["key"] == "127.0.0.1:9999"
+        assert "user:pw" not in str(snap), "观测面泄漏代理凭据！"
+        assert snap["proxy:127.0.0.1:9999"]["target"] == config.EDIT_PROXY_POOL_SIZE
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_dynamic_watermark_direct(fake_solve):
+    e = _EngineStub()
+    m = TokenPoolManager(e)
+    await m.start()
+    try:
+        assert m.pools_snapshot()["direct"]["target"] == 1  # 无排队：空闲保 1
+        e.queue.put_nowait("t1")
+        assert m.pools_snapshot()["direct"]["target"] == config.TOKEN_POOL_SIZE  # 有排队：补满
+    finally:
+        await m.stop()
+
+
+# ── P0-3 双水位 + 批量并发填充 ─────────────────────
+@pytest.mark.asyncio
+async def test_target_watermark_configurable(fake_solve, monkeypatch):
+    """TOKEN_TARGET_WATERMARK>1 时 direct 池无排队也维持 N 个预热 token（提升零延迟命中率）。"""
+    monkeypatch.setattr(config, "TOKEN_TARGET_WATERMARK", 3)
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        # 等预热填到 target=3（或 maxsize 取小）
+        for _ in range(100):
+            if m.pools_snapshot()["direct"]["size"] >= 3:
+                break
+            await asyncio.sleep(0.05)
+        assert m.pools_snapshot()["direct"]["size"] >= 3
+        assert m.pools_snapshot()["direct"]["target"] == 3
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_batch_fill_on_urgent(fake_solve, monkeypatch):
+    """TOKEN_URGENT_WATERMARK>0 + BATCH_FILL_SIZE>1 → urgent 时一次并发填 N 个 token。"""
+    monkeypatch.setattr(config, "TOKEN_URGENT_WATERMARK", 2)
+    monkeypatch.setattr(config, "TOKEN_BATCH_FILL_SIZE", 4)
+    # 串行池 maxsize=2 太小，扩大以观察批量填充效果
+    monkeypatch.setattr(config, "TOKEN_POOL_SIZE", 8)
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        # 等 prefetch_loop 检测到 urgent（total<2）→ 批量并发填 4 个
+        for _ in range(200):
+            if m.pools_snapshot()["direct"]["size"] >= 4:
+                break
+            await asyncio.sleep(0.05)
+        # 批量填充后 total 应 >= batch_size（4 个全成功，fake_solve 不失败）
+        assert m.pools_snapshot()["direct"]["size"] >= 4
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_batch_fill_disabled_by_default(fake_solve):
+    """默认 urgent=0/batch=1 → 不走批量分支，保持旧单次填充（向后兼容）。"""
+    assert config.TOKEN_URGENT_WATERMARK == 0
+    assert config.TOKEN_BATCH_FILL_SIZE == 1
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        # 池不应被一次性填满（单次填充 + 节流）
+        await asyncio.sleep(0.3)
+        snap = m.pools_snapshot()["direct"]
+        # 旧逻辑：无排队 target=1，单次填充维持 1 个
+        assert snap["size"] <= 2  # 单次填充 + 可能的 standby 残留，不会批量填 4
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_batch_fill_swallows_solve_failures(fake_solve, monkeypatch):
+    """批量填充时部分 solve 失败 → 不影响其他成功结果（gather return_exceptions）。"""
+    monkeypatch.setattr(config, "TOKEN_URGENT_WATERMARK", 2)
+    monkeypatch.setattr(config, "TOKEN_BATCH_FILL_SIZE", 3)
+    monkeypatch.setattr(config, "TOKEN_POOL_SIZE", 8)
+
+    call_count = {"n": 0}
+
+    async def _mixed(cf_solver_url, url, sitekey, timeout, proxy=None):
+        call_count["n"] += 1
+        await asyncio.sleep(0.03)
+        # 第 1、3 次失败，第 2 次成功 → gather return_exceptions 保留成功
+        if call_count["n"] % 2 == 1:
+            raise RuntimeError("solve fail")
+        return (f"tok-{call_count['n']}", 0.03)
+
+    monkeypatch.setattr("api.turnstile_client.solve_turnstile", _mixed)
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        for _ in range(200):
+            if m.pools_snapshot()["direct"]["size"] >= 1:
+                break
+            await asyncio.sleep(0.05)
+        # 即使部分失败，成功的 token 仍入池（不整体崩溃）
+        assert m.pools_snapshot()["direct"]["size"] >= 1
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_circuit_open_fast_fail(fake_solve, monkeypatch):
+    from api.solver_guard import solver_guard
+
+    for n in solver_guard.get_nodes():
+        monkeypatch.setattr(n, "_circuit_open", True)
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        t0 = time.monotonic()
+        tok = await m.acquire("direct", timeout=5)
+        assert tok is None
+        assert time.monotonic() - t0 < 0.5  # 熔断池空快速失败，不再干等 timeout
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_circuit_open_still_uses_existing_token(fake_solve, monkeypatch):
+    """熔断 OPEN 但池里已有现成 token → 仍可取用（求解失败≠token 无效），不浪费预取。"""
+    from api.solver_guard import solver_guard
+
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        # 等 direct 池预取到基础水位（无排队 target=1）
+        for _ in range(100):
+            if m.pools_snapshot()["direct"]["size"] >= 1:
+                break
+            await asyncio.sleep(0.05)
+        for n in solver_guard.get_nodes():
+            monkeypatch.setattr(n, "_circuit_open", True)
+        t0 = time.monotonic()
+        tok = await m.acquire("direct", timeout=3)  # OPEN 但池里有现成 token → 仍可取
+        assert tok is not None
+        assert time.monotonic() - t0 < 0.5
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_event_driven_refill_is_fast(fake_solve):
+    """池空 acquire → 事件驱动补池：耗时 = 单次求解(0.03s) + 成功节流(1.5s)，远小于轮询兜底。"""
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        first = await m.acquire("direct", timeout=2)
+        assert first
+        t0 = time.monotonic()
+        second = await m.acquire("direct", timeout=2)  # 池空，等事件补池
+        assert second
+        assert time.monotonic() - t0 < 2.5  # 成功求解后节流 1.5s（单槽 cf_solver 防 429）
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_proxy_pool_idle_flag(fake_solve):
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        proxy = "http://idle-proxy:8080"
+        await m.acquire(proxy, timeout=2)
+        m.pools[proxy].idle_ttl = 0.05
+        await asyncio.sleep(0.12)  # 池空 + 超 TTL 未活动
+        assert m.pools_snapshot()["proxy:idle-proxy:8080"]["idle"] is True
+    finally:
+        await m.stop()
+
+
+@pytest.mark.asyncio
+async def test_acquire_timeout_counts_wait_timeout(monkeypatch):
+    """池空且求解持续失败（solve 抛异常）→ acquire 超时 → wait_timeout_total 累计。"""
+
+    async def _fail(*args, **kwargs):
+        await asyncio.sleep(0.2)
+        raise RuntimeError("solve fail")
+
+    monkeypatch.setattr("api.turnstile_client.solve_turnstile", _fail)
+    m = TokenPoolManager(_EngineStub())
+    await m.start()
+    try:
+        tok = await m.acquire("direct", timeout=0.5)
+        assert tok is None
+        assert m.wait_timeout_total >= 1
+    finally:
+        await m.stop()
+
+
+# ── main 层：/healthz 与 /metrics 新观测字段 ─────────
+class TestMainObservability:
+    @pytest.mark.asyncio
+    async def test_healthz_has_solver_fields(self):
+        from api.routes.health import healthz
+
+        h = await healthz()
+        for k in (
+            "solver_status",
+            "solve_success_total",
+            "solve_failure_total",
+            "solve_avg_seconds",
+            "solve_window_success_rate",
+            "solve_window_solve_count",
+            "solve_consecutive_failures",
+            "solve_last_failure_at",
+            "solver_circuit_open",
+            "solve_rejected_total",
+            "token_pools",
+        ):
+            assert k in h, f"healthz 缺字段 {k}"
+        assert h["solver_status"] in ("ok", "degraded", "circuit_open")
+        assert "direct" in (h["token_pools"] or {})
+
+    @pytest.mark.asyncio
+    async def test_metrics_has_solver_lines(self, monkeypatch):
+        from api.routes import admin
+
+        # 观测面依赖（engine/db/solver_guard）monkeypatch 成确定返回，避免依赖
+        # 真实全局单例 DB/engine（无 pytest session fixture、loop 漂移、0 值缺序列）。
+        async def _stats():
+            return {"total_requests": 0, "total_images": 0, "total_errors": 0, "avg_duration_sec": None}
+
+        snap = {
+            "processing": 0,
+            "queued": 0,
+            "queue_capacity": 100,
+            "workers": 2,
+            "uptime_seconds": 1,
+            "token_pools": {"direct": {"key": "direct", "size": 0}},
+            "edit_inflight": 0,
+            "token_wait_timeout_total": 0,
+        }
+        ssnap = {
+            "solve_total": 10,
+            "solve_success_total": 7,
+            "solve_failure_total": 3,
+            "solve_avg_seconds": 1.0,
+            "solve_total_duration": 7.0,
+            "window_success_rate": 0.7,
+            "window_solve_count": 10,
+            "window_avg_seconds": 1.0,
+            "consecutive_failures": 0,
+            "circuit_open": False,
+            "rejected_total": 0,
+            "solver_status": "ok",
+            "nodes": [],
+        }
+        monkeypatch.setattr(admin.engine, "snapshot", lambda: snap)
+        monkeypatch.setattr(admin.db, "stats_overview", _stats)
+        monkeypatch.setattr(admin.solver_guard, "snapshot", lambda: ssnap)
+
+        text = (await admin.metrics()).body.decode()
+        for line in (
+            'imagefree_solve_total{result="success"}',
+            'imagefree_solve_total{result="failure"}',
+            "imagefree_solve_duration_seconds_sum",
+            "imagefree_solve_duration_seconds_count",
+            "imagefree_solve_window_success_rate",
+            "imagefree_solve_consecutive_failures",
+            "imagefree_solver_circuit_open",
+            "imagefree_solve_rejected_total",
+            "imagefree_token_wait_timeout_total",
+            'imagefree_token_pool_watermark{pool="direct"}',
+        ):
+            assert line in text, f"metrics 缺行 {line}"
+
+    @pytest.mark.asyncio
+    async def test_metrics_keeps_legacy_lines(self):
+        from api.routes.admin import metrics
+
+        text = (await metrics()).body.decode()
+        assert "imagefree_requests_total" in text
+        assert "imagefree_token_pool" in text
+        assert "imagefree_processing" in text
+
+
+# ── worker 链路：上游拒绝 token 的 rejected 计数 ─────
+@pytest.mark.asyncio
+async def test_worker_records_rejected_token(tmp_db, monkeypatch):
+    """上游拒绝 token（human verification failed）→ solver_guard.rejected_total 计数（重试换 token 信号）。"""
+    from api.solver_guard import solver_guard
+    from api.worker import Engine
+
+    async def _solve(*a, **k):
+        return ("mock-token", 0.03)
+
+    async def _submit(*a, **k):
+        raise RuntimeError("human verification failed")
+
+    # 缩小退避间隔，加速测试
+    from api import config
+
+    monkeypatch.setattr(config, "IF_TXT_RETRY_BACKOFF_BASE", 0.1)
+    monkeypatch.setattr(config, "IF_PREFETCH_AFTER_SOLVE_DELAY", 0.01)
+
+    monkeypatch.setattr("api.turnstile_client.solve_turnstile", _solve)
+    monkeypatch.setattr("api.imagefree_client.submit_generate", _submit)
+    before = solver_guard.snapshot()["rejected_total"]
+    e = Engine(tmp_db)
+    await e.start()
+    try:
+        tid = await e.submit("p", "1:1", False)
+        await e.wait_result(tid, 60)
+        after = solver_guard.snapshot()["rejected_total"]
+        assert after >= before + 1
+        assert (await e.db.get(tid))["status"] == "error"
+    finally:
+        await e.stop()

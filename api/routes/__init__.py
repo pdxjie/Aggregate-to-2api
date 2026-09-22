@@ -1,0 +1,56 @@
+"""路由子包：main.py 拆分目标（v4.2）。
+
+main.py 收敛为 app 组装；本包按功能域挂载所有 /v1 端点。
+"""
+
+from fastapi import APIRouter
+
+from ..agent import routes as agent_routes
+from ..mcp import server as mcp_server  # noqa: F401  (v12.0.0 P1-M1 MCP：/v1/mcp)
+from . import (
+    admin,
+    agent_dag,  # noqa: F401  (v9.0.0-A DAG 编排：/v1/agent/dag/*)
+    agent_human,  # noqa: F401  (v12.0.1 T3 human_input 审批：/v1/agent/human-inbox*)
+    agent_skills_admin,  # noqa: F401  (B2/P0-1 技能沉淀：/v1/agent/skills/save-from-run)
+    chat,
+    ecosystem,
+    gallery,  # noqa: F401  (P3-D1 向量检索：/v1/gallery/similar)
+    generate,
+    health,
+    mcp_admin,  # noqa: F401  (v18 P1-3 MCP 渐进暴露审批：/v1/admin/mcp-tools/*)
+    ppt,  # noqa: F401  (v18 P1-2 PPT 可编辑产物：/v1/skills/ppt/generate)
+    security,
+    tasks,
+    video,  # noqa: F401  (v18 P1-1 视频 Mock：/v1/video)
+)
+
+# ── 注册所有路由 ──
+api_router = APIRouter()
+
+api_router.include_router(health.router)
+api_router.include_router(tasks.router)
+api_router.include_router(generate.router)
+api_router.include_router(admin.router)
+api_router.include_router(chat.router)
+api_router.include_router(security.router)
+api_router.include_router(ecosystem.router)
+# v8.1 P1-A：agent 子系统路由（/v1/agent/*），向后兼容不破坏现有端点
+api_router.include_router(agent_routes.router)
+# v9.0.0-A：智能体 DAG 编排（/v1/agent/dag/run + /plan + /{run_id}），开关关闭时 404
+api_router.include_router(agent_dag.router)
+# v12.0.0 P1-M1：MCP 协议化（POST /v1/mcp JSON-RPC 2.0），IF_MCP_ENABLED=0（默认）时 404
+api_router.include_router(mcp_server.router)
+# v12.0.1 T3：human_input 审批通道（/v1/agent/human-inbox*），节点侧由 IF_HUMAN_INPUT_ENABLED 控制
+api_router.include_router(agent_human.router)
+# B2 / P0-1：技能沉淀管理（保存/审批/我的技能），IF_SKILL_SEDIMENT_ENABLED=0 时保存端点 404
+api_router.include_router(agent_skills_admin.router)
+# v18 P1-3：MCP 渐进暴露审批（/v1/admin/mcp-tools/*，admin key）
+api_router.include_router(mcp_admin.router)
+# v18 P1-2：PPT 可编辑产物生成（IF_PPT_GENERATE=0 时 404）
+api_router.include_router(ppt.router)
+# v18 P1-1：视频 Mock 任务（IF_VIDEO_ENABLED=0 时 404）
+api_router.include_router(video.router)
+# v8.3 P3-D1：画廊相似图检索（/v1/gallery/similar*），依赖 IF_VECTOR_SEARCH_ENABLED=1
+api_router.include_router(gallery.router)
+
+__all__ = ["api_router"]

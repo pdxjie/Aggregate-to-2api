@@ -1,0 +1,254 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'v*']
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 测试 (${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ['3.11']
+        os: [ubuntu-latest]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx pytest-timeout pytest-benchmark
+
+      - name: 单元测试（排除集成/混沌；slow=真实网络也不跑）
+        # P0-11 根治：.gitignore `config/` 误伤 api/config/presets.py（已改 /config/ + 提交）。
+        # v8.2.1 发现 tee 的 pytest stdout 在 Actions 上被截断（grep/tail 段不可见），
+        # 改用 --junitxml + Python 解析 xml 直接输出失败用例名+message（绕过 stdout 缓冲）。
+        run: |
+          set +e
+          pytest tests/ -m "not integration and not chaos and not slow" --cov=api --cov-report=term --cov-fail-under=80 --timeout=120 --timeout-method=thread -p faulthandler -p no:cacheprovider --tb=short -rA --junitxml=/tmp/pytest-unit.xml
+          PYTEST_EXIT=$?
+          echo "PYTEST_EXIT=${PYTEST_EXIT}"
+          echo "=== 失败用例（从 junitxml 解析）==="
+          python3 -c "
+          import re, sys
+          try:
+              xml=open('/tmp/pytest-unit.xml',encoding='utf-8').read()
+              cnt=0
+              for m in re.finditer(r'classname=\"([^\"]+)\" name=\"([^\"]+)\"[^>]*>(.*?)</testcase>', xml, re.S):
+                  if '<failure' in m.group(3):
+                      cnt+=1
+                      fm=re.search(r'message=\"([^\"]{0,300})\"', m.group(3))
+                      print('FAIL:', m.group(1)+'::'+m.group(2), '|', (fm.group(1)[:200] if fm else ''))
+              print(f'=== 共 {cnt} 个失败 ===')
+          except Exception as e:
+              print('junit 解析失败:', e)
+          "
+          exit ${PYTEST_EXIT}
+        env:
+          IF_ACCOUNT_AUTO: "0"
+          IF_MOCK_REGISTER: "1"
+          IF_DB_FILE: "data/test.db"
+          PYTHONUNBUFFERED: "1"
+
+      - name: 启动 mock cf_solver 并运行集成测试
+        # v7.7 缓解组合串扰：integration 与 chaos 分两轮跑（各自 fresh 进程内状态），
+        # 避免混沌注入的 IP 桶/限流状态污染集成用例（本地 3 轮复现→分轮后收敛）。
+        # P0-11：加 --junitxml + 解析失败用例（-q stdout 在 Actions 被吞）。
+        run: |
+          set +e
+          python scripts/mock_cfsolver.py --port 8001 &
+          CF_PID=$!
+          for i in $(seq 1 10); do
+            curl -sf http://127.0.0.1:8001/turnstile?url=x\&sitekey=x > /dev/null 2>&1 && break
+            sleep 1
+          done
+          pytest tests/integration/ -m "integration" --cov=api --cov-report=term --timeout=120 --timeout-method=thread -p no:cacheprovider --junitxml=/tmp/pytest-intg.xml -rA --tb=short
+          INTG_EXIT=$?
+          echo "INTG_EXIT=${INTG_EXIT}"
+          echo "=== 集成失败用例（从 junitxml 解析）==="
+          python3 -c "
+          import re
+          try:
+              xml=open('/tmp/pytest-intg.xml',encoding='utf-8').read()
+              cnt=0
+              for m in re.finditer(r'classname=\"([^\"]+)\" name=\"([^\"]+)\"[^>]*>(.*?)</testcase>', xml, re.S):
+                  if '<failure' in m.group(3):
+                      cnt+=1
+                      fm=re.search(r'message=\"([^\"]{0,300})\"', m.group(3))
+                      print('FAIL:', m.group(1)+'::'+m.group(2), '|', (fm.group(1)[:200] if fm else ''))
+              print(f'=== 集成共 {cnt} 个失败 ===')
+          except Exception as e:
+              print('junit 解析失败:', e)
+          "
+          pytest tests/ -q -m "chaos" --cov=api --cov-report=term --cov-append --timeout=120 --timeout-method=thread
+          CHAOS_EXIT=$?
+          kill $CF_PID 2>/dev/null || true
+          exit ${INTG_EXIT}
+        env:
+          IF_ACCOUNT_AUTO: "0"
+          IF_MOCK_REGISTER: "1"
+          IF_CF_SOLVER_URL: "http://127.0.0.1:8001"
+          IF_DB_FILE: "data/test-ci.db"
+          IF_TURNSTILE_POLL_INTERVAL: "0.2"
+          IF_TOKEN_POOL_SIZE: "2"
+          PYTHONUNBUFFERED: "1"
+
+  lint:
+    name: 代码检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装 ruff
+        # 锁定版本：与本地开发环境一致（0.15.x 默认规则集变更会引入 BLE001/SIM102 等噪声）
+        run: pip install "ruff==0.14.9"
+      - name: 运行 ruff check（失败则 CI 失败）
+        run: ruff check api/ --no-fix
+
+  # ── P0-2：前端版本一致性门禁（防 landing dist 版本漂移）──────────────
+  # 背景：landing/dist 被 .gitignore 忽略（第 65-69 行），本地版本 bump 若只改 package.json
+  # 不重跑 npm run build，产物就落后于源码版本；而 ci.yml 的 test job 从未构建 landing，
+  # 导致 TestFrontendVersionConsistency::test_landing_built_dist_version_matches_source 在 CI 中
+  # 永远走 pytest.skip，无法拦截漂移。
+  # 本 job 强制从源码重跑构建并断言 __APP_VERSION__ 注入 = 三处版本一致，失败即 CI 变红。
+  frontend-version-gate:
+    name: 前端版本一致性门禁（构建 landing + 断言版本）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 先用 Node 从源码强制构建 landing（每次落地最新 package.json 的版本号）
+      - name: 设置 Node.js（构建 landing）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: landing/package-lock.json
+      - name: npm ci && npm run build (landing)
+        run: |
+          cd landing && npm ci && npm run build
+
+      # 再装 Python 依赖并跑版本一致性契约（此 job 里构建过 dist，故 dist 断言不会 skip）
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx pytest-timeout pytest-benchmark
+      - name: 版本一致性断言（失败则 CI 失败）
+        # P0-11（v9.0.0）：强化输出可见性——历史遗留 exit 4 但 GitHub Actions step output
+        # 默认不捕获 pytest stdout，只剩 "Process completed with exit code 4." 无 stderr。
+        # 改为：去掉 -q 静默 + --tb=long 完整 traceback + -v 逐用例输出 + tee 到日志文件
+        # （$GITHUB_STEP_SUMMARY 让摘要也可见，防日志被截断后无诊断线索）。
+        run: |
+          set -o pipefail
+          pytest tests/test_openapi_contract.py::TestFrontendVersionConsistency -v --tb=long -p no:cacheprovider 2>&1 | tee /tmp/version-gate.log
+          {
+            echo "## TestFrontendVersionConsistency 结果"
+            echo '```'
+            cat /tmp/version-gate.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          IF_ACCOUNT_AUTO: "0"
+          IF_MOCK_REGISTER: "1"
+          IF_DB_FILE: "data/test-ci.db"
+
+  # ── v7.7：frontend 管理面板 CI 门禁 ───────────────────────────────
+  # 背景：landing 有 frontend-version-gate，但 frontend/src（React 管理面板）
+  # 的 tsc/vitest/build 从无 CI 门禁——类型错误或用例回归只能靠本地自觉。
+  # 本 job 补齐：tsc 0 error + vitest 全绿 + vite build 成功三道闸。
+  frontend-gate:
+    name: 前端管理面板门禁（tsc + vitest + build）
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: 设置 Node.js（构建 frontend）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        run: cd frontend && npm ci
+      - name: TypeScript 类型检查 + 构建（tsc -b && vite build）
+        run: cd frontend && npm run build
+      - name: Vitest 单测
+        run: cd frontend && npm run test
+
+  # ── v9.0.0 R6：前端 E2E + 自动化审计 CI 门禁 ──────────────────────
+  # 背景：frontend/e2e-smoke.cjs（22 断言）+ a11y-audit.cjs + perf-audit.cjs + resp-audit.cjs
+  # 此前无 CI 门禁，只能本地手动跑。本 job 补齐：缓存 chromium + 跑 4 个 .cjs 审计。
+  # E2E_BASE 指向 vite preview（先 build + preview :4510），断言降级 UI + a11y + 懒加载。
+  frontend-e2e:
+    name: 前端 E2E + 自动化审计（e2e-smoke + a11y + perf + resp）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        run: cd frontend && npm ci
+      - name: 安装 Playwright chromium（系统级，供 .cjs 脚本用）
+        run: cd frontend && npx playwright-core install --with-deps chromium
+      - name: 构建 frontend dist
+        run: cd frontend && npm run build
+      - name: 起 vite preview :4510（后台）
+        run: |
+          cd frontend && nohup npx vite preview --port 4510 --strictPort > /tmp/preview.log 2>&1 &
+          sleep 5
+          curl -s -o /dev/null -w "preview=%{http_code}\n" http://localhost:4510/
+      - name: e2e-smoke（22 断言：降级 UI + a11y + 懒加载 + skip-link）
+        run: cd frontend && E2E_BASE=http://localhost:4510 node e2e-smoke.cjs
+      - name: a11y-audit（axe-core WCAG 2.2 AA 0 critical）
+        run: cd frontend && E2E_BASE=http://localhost:4510 node a11y-audit.cjs
+        continue-on-error: true  # 软门禁：失败先告警不阻塞（a11y 仍需渐进收紧）
+      - name: perf-audit（Lighthouse LCP/INP/CLS）
+        run: cd frontend && E2E_BASE=http://localhost:4510 node perf-audit.cjs
+        continue-on-error: true  # 软门禁：Lighthouse 在 CI runner 性能波动大
+      - name: resp-audit（4 断点截图 375/768/1024/1440）
+        run: cd frontend && E2E_BASE=http://localhost:4510 node resp-audit.cjs
+        continue-on-error: true  # 软门禁：截图归档，不阻塞
+
+  docker:
+    name: Docker 构建验证
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建 API 镜像
+        run: docker build -f deploy/Dockerfile.api -t imagefree-api:ci .
+      - name: 验证镜像
+        run: |
+          SIZE=$(docker image inspect imagefree-api:ci --format='{{.Size}}')
+          echo "镜像大小: $((SIZE / 1024 / 1024))MB"
+          test $SIZE -lt $((300 * 1024 * 1024))
