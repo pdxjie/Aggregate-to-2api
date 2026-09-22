@@ -1,5 +1,7 @@
 # Camoufox Offline Packages
 
+Chinese version: [`CAMOUFOX_OFFLINE_PACKAGES.zh-CN.md`](CAMOUFOX_OFFLINE_PACKAGES.zh-CN.md)
+
 Camoufox browser zip packages are intentionally not committed to this repository.
 The packages are larger than GitHub's normal 100 MB file limit, so each machine
 should download the matching package and place it in the path below.
