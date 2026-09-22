@@ -1,6 +1,9 @@
 # Camoufox Windows Offline Package
 
 This folder contains the Windows x64 Camoufox browser package used by `deploy/cf_solver`.
+The zip package itself is not committed because it is larger than GitHub's normal
+100 MB file limit. Download links and hashes are tracked in
+[`../CAMOUFOX_OFFLINE_PACKAGES.md`](../CAMOUFOX_OFFLINE_PACKAGES.md).
 
 ## Files
 
